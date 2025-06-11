@@ -1,0 +1,19 @@
+# Compiled binaries
+*.exe
+*.dll
+*.obj
+*.pdb
+*.ilk
+
+# Visual Studio files
+.vs/
+x64/
+Debug/
+Release/
+*.vcxproj*
+*.sln
+*.user
+
+# Build artifacts
+*.log
+*.tlog

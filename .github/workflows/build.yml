@@ -1,0 +1,42 @@
+name: Build RCPatcher
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup MSVC
+      uses: microsoft/setup-msbuild@v2
+      
+    - name: Setup Developer Command Prompt
+      uses: ilammy/msvc-dev-cmd@v1
+      
+    - name: Build RCPatcher
+      run: |
+        cl.exe /EHsc /O2 RCPatcher.cpp /Fe:RCPatcher.exe
+        
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: RCPatcher-Windows
+        path: RCPatcher.exe
+        
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: RCPatcher.exe
+        name: RCPatcher ${{ github.ref_name }}
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
