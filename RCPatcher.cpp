@@ -3,14 +3,23 @@
 #include <string>
 #include <vector>
 #include <iomanip>
+#include <cstring>
 #include <csignal>
 using namespace std;
 void signalHandler(int signum) {
     cout << "\n[!] Interrupted by user. Exiting..." << endl;
     exit(0);
 }
+struct ServerInfo {
+    string server;
+    string port;
+    size_t serverOffset;
+    size_t portOffset;
+    size_t serverMaxLen;
+    size_t portMaxLen;
+};
 void banner() {
-    cout << "\n###############################################################################\n";
+    cout << "\n#################################################################################\n";
     cout << "#    ######   ###### #######   #####  ####### ###### ##   ## ####### ######     #\n";
     cout << "#    ##   ##  ##     ##   ##  ##   ##    ##   ##     ##   ## ##      ##   ##    #\n";
     cout << "#    ######   ##     #######  #######    ##   ##     ####### #####   ######     #\n";
@@ -18,70 +27,100 @@ void banner() {
     cout << "#    ##   ##  ###### ##       ##   ##    ##   ###### ##   ## ####### ##   ##    #\n";
     cout << "#################################################################################\n\n";
 }
-bool findSignature(const vector<char>& data, const string& sig) {
-    for (size_t i = 0; i <= data.size() - sig.length(); i++) {
-        if (memcmp(&data[i], sig.c_str(), sig.length()) == 0) return true;
+ServerInfo findServerInfo(vector<char>& data) {
+    ServerInfo info = { "", "", 0, 0, 0, 0 };
+    const string marker = "Offline";
+    const string portMarker1 = "14922";
+    const string portMarker2 = "14900";
+    for (size_t i = 0; i < data.size() - 100; i++) {
+        if (memcmp(&data[i], marker.c_str(), marker.length()) == 0) {
+            size_t serverStart = i + marker.length() + 1;
+            if (serverStart >= data.size()) continue;
+            size_t serverEnd = serverStart;
+            while (serverEnd < data.size() && data[serverEnd] != 0 && serverEnd < serverStart + 50) serverEnd++;
+            if (serverEnd > serverStart) {
+                info.server = string(&data[serverStart], serverEnd - serverStart);
+                info.serverOffset = serverStart;
+                size_t searchStart = serverEnd;
+                while (searchStart < data.size() - 10 && searchStart < serverEnd + 30) {
+                    if ((memcmp(&data[searchStart], portMarker1.c_str(), 5) == 0) || (memcmp(&data[searchStart], portMarker2.c_str(), 5) == 0) || (data[searchStart] >= '1' && data[searchStart] <= '9' && data[searchStart + 1] >= '0' && data[searchStart + 1] <= '9')) {
+                        info.portOffset = searchStart;
+                        size_t portEnd = searchStart;
+                        while (portEnd < data.size() && data[portEnd] >= '0' && data[portEnd] <= '9' && portEnd < searchStart + 8) portEnd++;
+                        info.port = string(&data[searchStart], portEnd - searchStart);
+                        info.serverMaxLen = searchStart - serverStart - 1;
+                        info.portMaxLen = 8;
+                        cout << "[*] Found server config at offset 0x" << hex << serverStart << dec << endl;
+                        cout << "[*] Current: " << info.server << ":" << info.port << endl;
+                        cout << "[*] Server field size: " << info.serverMaxLen << " bytes" << endl;
+                        return info;
+                    }
+                    searchStart++;
+                }
+            }
+        }
     }
-    return false;
+    return info;
 }
-void patchString(vector<char>& data, size_t offset, const string& newStr, size_t maxLen) {
-    if (offset + maxLen > data.size()) return;
-    memset(&data[offset], 0, maxLen);
-    memcpy(&data[offset], newStr.c_str(), min(newStr.length(), maxLen));
+void patchData(vector<char>& data, const ServerInfo& info, const string& newServer, const string& newPort) {
+    if (newServer.length() > info.serverMaxLen) {
+        cout << "[!] Warning: Server name too long (" << newServer.length() << " > " << info.serverMaxLen << "), will be truncated" << endl;
+    }
+    memset(&data[info.serverOffset], 0, info.serverMaxLen);
+    memcpy(&data[info.serverOffset], newServer.c_str(), min(newServer.length(), info.serverMaxLen));
+    memset(&data[info.portOffset], 0, info.portMaxLen);
+    memcpy(&data[info.portOffset], newPort.c_str(), min(newPort.length(), info.portMaxLen));
 }
 int main(int argc, char* argv[]) {
-    signal(SIGINT, signalHandler);
     banner();
-    string filename;
-    if (argc == 2) filename = argv[1];
-    else if (argc == 1) {
+    signal(SIGINT, signalHandler);
+    string filename = (argc == 2) ? argv[1] : "";
+    if (filename.empty()) {
         cout << "[?] Enter target executable path: ";
         getline(cin, filename);
-        if (filename.empty()) { cout << "[!] No file specified. Exiting..." << endl; return 0; }
-    }else {
-        cout << "[-] Usage: " << argv[0] << " <target.exe>" << endl;
-        return 1;
+        if (filename.empty()) {
+            cout << "\n[-] No filename provided!" << endl;
+            return 1;
+        }
     }
-    cout << "[*] Loading target executable: " << filename << endl;
+    cout << "[*] Loading: " << filename << endl;
     ifstream file(filename, ios::binary);
     if (!file) {
-        cout << "[-] ERROR: Cannot open " << filename << "\n[*] Press any key to exit...";
-        cin.ignore(); cin.get(); return 1;
+        cout << "[-] Cannot open file!\n[*] Press any key to exit...";
+        system("pause");
+        return 1;
     }
     vector<char> data((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
     file.close();
-    cout << "[*] File loaded (" << data.size() << " bytes)\n[*] Verifying target signature..." << endl;
-    if (!findSignature(data, "GSERV025") && !findSignature(data, "RemoteControl")) {
-        cout << "[-] SIGNATURE MISMATCH! Wrong executable.\n[*] Press any key to exit...";
-        cin.ignore(); cin.get(); return 1;
+    cout << "[*] Loaded " << data.size() << " bytes" << endl;
+    cout << "[*] Scanning for server configuration..." << endl;
+    ServerInfo info = findServerInfo(data);
+    if (info.serverOffset == 0) {
+        cout << "[-] Could not find server configuration!\n";
+        cout << "[*] Trying hardcoded offsets..." << endl;
+        info.serverOffset = 0xFB5D1;
+        info.portOffset = 0xFB5EC;
+        info.serverMaxLen = 27;
+        info.portMaxLen = 5;
     }
-    cout << "[+] Target verified! Proceeding with patch..." << endl;
     string newServer, newPort;
     cout << "\n[?] Enter new server: "; cin >> newServer;
     cout << "[?] Enter new port: "; cin >> newPort;
-
-    cout << "\n[*] Patching offsets..." << endl;
-    const size_t serverOffset = 0xFB5D1, portOffset = 0xFB5EC;
-    if (serverOffset < data.size()) {
-        patchString(data, serverOffset, newServer, 25);
-        cout << "[+] Server patched at 0x" << hex << uppercase << serverOffset << endl;
-    }
-    if (portOffset < data.size()) {
-        patchString(data, portOffset, newPort, 8);
-        cout << "[+] Port patched at 0x" << hex << uppercase << portOffset << endl;
-    }
-    cout << "\n[*] Writing patched executable..." << endl;
+    cout << "\n[*] Patching..." << endl;
+    patchData(data, info, newServer, newPort);
+    cout << "[+] Server patched at 0x" << hex << info.serverOffset << dec << endl;
+    cout << "[+] Port patched at 0x" << hex << info.portOffset << dec << endl;
     size_t lastSlash = filename.find_last_of("/\\");
     string outputName = (lastSlash != string::npos) ? filename.substr(0, lastSlash + 1) + "patched_" + filename.substr(lastSlash + 1) : "patched_" + filename;
     ofstream outFile(outputName, ios::binary);
     if (!outFile) {
-        cout << "[-] ERROR: Cannot write output file\n[*] Press any key to exit...";
-        cin.ignore(); cin.get(); return 1;
+        cout << "[-] Cannot write output!\n[*] Press any key to exit...";
+        cin.get(); return 1;
     }
     outFile.write(data.data(), data.size());
     outFile.close();
-    cout << "[+] SUCCESS! Patched file: " << outputName << endl;
-    cout << "[+] Target: " << newServer << ":" << newPort << endl;
+    cout << "[+] SUCCESS! Saved: " << outputName << endl;
+    cout << "[+] New target: " << newServer << ":" << newPort << endl;
     cout << "\n[*] Press any key to exit...";
     cin.ignore(); cin.get();
     return 0;
