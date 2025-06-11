@@ -26,6 +26,17 @@ jobs:
     - name: Build RCPatcher
       run: |
         cl.exe /EHsc /O2 RCPatcher.cpp /Fe:RCPatcher.exe
+        dir
+        
+    - name: Verify executable exists
+      run: |
+        if (Test-Path "RCPatcher.exe") { 
+          Write-Host "✓ RCPatcher.exe found"
+          Get-ChildItem RCPatcher.exe
+        } else { 
+          Write-Host "✗ RCPatcher.exe not found"
+          Get-ChildItem
+        }
         
     - name: Upload artifact
       uses: actions/upload-artifact@v4
@@ -37,7 +48,7 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: RCPatcher.exe
+        files: ./RCPatcher.exe
         name: RCPatcher ${{ github.ref_name }}
         draft: false
         prerelease: false
