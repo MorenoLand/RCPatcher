@@ -18,6 +18,13 @@ struct ServerInfo {
     size_t serverMaxLen;
     size_t portMaxLen;
 };
+struct VersionInfo {
+    const char* name;
+    size_t serverOffset;
+    size_t portOffset;
+    size_t serverMaxLen;
+    size_t portMaxLen;
+};
 ServerInfo findServerInfo(vector<char>& data) {
     ServerInfo info = { "", "", 0, 0, 0, 0 };
     const string marker = "Offline";
@@ -53,6 +60,17 @@ ServerInfo findServerInfo(vector<char>& data) {
     }
     return info;
 }
+VersionInfo detectVersion(size_t fileSize) {
+    if (fileSize >= 490000 && fileSize <= 510000) {
+        return { "RC2 Windows", 0x72DC0, 0x72DD8, 27, 5 };
+    } else if (fileSize >= 1180000 && fileSize <= 1190000) {
+        return { "RC2 Linux", 0xE32DB, 0xE32FD, 27, 5 };
+    } else if (fileSize >= 1800000) {
+        return { "RC3", 0xFB5D1, 0xFB5EC, 27, 5 };
+    } else {
+        return { "Unknown", 0xE32DB, 0xE32FD, 27, 5 };
+    }
+}
 void patchData(vector<char>& data, const ServerInfo& info, const string& newServer, const string& newPort) {
     if (newServer.length() > info.serverMaxLen) {
         cout << "[!] Warning: Server name too long (" << newServer.length() << " > " << info.serverMaxLen << "), will be truncated" << endl;
@@ -87,11 +105,13 @@ int main(int argc, char* argv[]) {
     ServerInfo info = findServerInfo(data);
     if (info.serverOffset == 0) {
         cout << "[-] Could not find server configuration!\n";
-        cout << "[*] Trying hardcoded offsets..." << endl;
-        info.serverOffset = 0xFB5D1;
-        info.portOffset = 0xFB5EC;
-        info.serverMaxLen = 27;
-        info.portMaxLen = 5;
+        cout << "[*] Detecting version for hardcoded offsets..." << endl;
+        VersionInfo version = detectVersion(data.size());
+        cout << "[*] Detected: " << version.name << endl;
+        info.serverOffset = version.serverOffset;
+        info.portOffset = version.portOffset;
+        info.serverMaxLen = version.serverMaxLen;
+        info.portMaxLen = version.portMaxLen;
     }
     string newServer, newPort;
     cout << "\n[?] Enter new server: "; cin >> newServer;
